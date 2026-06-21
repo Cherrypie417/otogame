@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>スマホ対応2レーン音ゲー (SE・ズレ調整版)</title>
+    <title>スマホ対応2レーン音ゲー (BPM150・難易度中)</title>
     <style>
         body {
             background-color: #111;
@@ -67,7 +67,7 @@
         .note {
             position: absolute;
             width: 80%;
-            height: 18px;
+            height: 20px;
             background-color: #00ffcc;
             left: 10%; 
             border-radius: 4px;
@@ -107,7 +107,7 @@
 
     <div id="start-screen">
         <button id="start-btn">GAME START</button>
-        <p style="margin-top:20px; color:#ccc;">画面の左右をタップ<br>（PCは D / K キー）</p>
+        <p style="margin-top:20px; color:#ccc;">画面の左右をタップ<br>（PCは D / K キー）<br>※PCはスペースキーでも開始できます</p>
     </div>
 
     <div id="ui-layer">
@@ -127,8 +127,9 @@
         // ==========================================
         // ⚙️ ゲームの各種設定
         // ==========================================
-        const BPM = 120;             
-        const fallTimeSec = 1.0; // ノーツが落ちてくる時間
+        // 教えていただいたBPM150に設定しました！
+        const BPM = 150;             
+        const fallTimeSec = 1.0; 
         
         // ⏱️ 音ズレ調整（秒数）
         // 音楽よりノーツが「遅れて」降ってくる場合はプラス（例: 0.1）
@@ -163,7 +164,7 @@
             }
         }
 
-        // タップした時に短い「ポッ」という音を鳴らす
+        // タップ音を「チッ」というハッキリした音に改良
         function playTapSound() {
             if (!audioCtx) return;
             const osc = audioCtx.createOscillator();
@@ -171,15 +172,15 @@
             osc.connect(gain);
             gain.connect(audioCtx.destination);
             
-            osc.type = 'sine'; // 音の種類（sine, square, sawtooth, triangle）
-            osc.frequency.setValueAtTime(600, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.05); // ピッチを下げる
+            osc.type = 'triangle'; // より耳に残りやすい波形
+            osc.frequency.setValueAtTime(800, audioCtx.currentTime); // 高めの音から
+            osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1); // 急激に下げる
             
-            gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05); // 音量をすばやく減衰
+            gain.gain.setValueAtTime(0.4, audioCtx.currentTime); // 音量を少し上げる
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1); 
             
             osc.start(audioCtx.currentTime);
-            osc.stop(audioCtx.currentTime + 0.05);
+            osc.stop(audioCtx.currentTime + 0.1);
         }
 
         window.addEventListener('resize', () => {
@@ -187,14 +188,178 @@
             judgmentY = boardHeight * 0.85;
         });
 
-        // 🎼 リズムパターンを使った譜面生成（最大3連打）
+        // 🎼 程よい難易度の譜面パターン（連打を減らしました）
         function generateChart() {
             chart = [];
             const secPerBeat = 60 / BPM;              
             const secPerMeasure = secPerBeat * 4;     
             const totalMeasures = 100;                
 
-            // 音楽的に自然なノーツの配置パターン（1小節=16分割）
-            // 最大でも3連打までしか入らないように設計しています
+            // 1小節の中で「どこにノーツを置くか」のパターン（16分割）
+            // 密度を大幅に下げ、基本は四つ打ちや裏打ちにしています
             const patterns = [
-                [0, 4, 8, 12],
+                [0, 8],                   // 2つ（スッカスカな休憩地帯）
+                [0, 4, 8, 12],            // 4つ（等間隔の基本リズム）
+                [0, 8, 12],               // 3つ（タン・休・タン・タン）
+                [0, 4, 8],                // 3つ（タン・タン・タン・休）
+                [0, 6, 8, 12],            // 4つ（少しだけハネるリズム）
+                [0, 8, 10, 12]            // 4つ（後半に軽快なタタン）
+            ];
+
+            for (let m = 0; m < totalMeasures; m++) {
+                let measureStartTime = m * secPerMeasure;
+                let selectedPattern = patterns[Math.floor(Math.random() * patterns.length)];
+
+                for (let slot of selectedPattern) {
+                    let time = measureStartTime + slot * (secPerMeasure / 16);
+                    if (time > 2.0) {
+                        chart.push({
+                            targetTime: time,
+                            lane: Math.floor(Math.random() * 2),
+                            spawned: false,
+                            element: null
+                        });
+                    }
+                }
+            }
+            chart.sort((a, b) => a.targetTime - b.targetTime);
+        }
+
+        // ゲーム開始処理を関数化（クリックでもキーボードでも呼べるように）
+        function startGame() {
+            if (gameActive) return; // 既に始まっていたら無視
+            
+            initAudio(); 
+            startScreen.style.display = 'none';
+            score = 0;
+            scoreDisplay.innerText = score;
+            generateChart(); 
+            
+            gameActive = true;
+            bgm.currentTime = 0;
+            bgm.play();
+            
+            requestAnimationFrame(update);
+        }
+
+        // ボタンのクリック/タップで開始
+        startBtn.addEventListener('click', startGame);
+        startBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            startGame();
+        });
+
+        bgm.addEventListener('ended', () => {
+            gameActive = false;
+            showFeedback('FINISH!', '#fff');
+        });
+
+        function update() {
+            if (!gameActive) return;
+            let syncTime = bgm.currentTime + OFFSET_SEC;
+
+            for (let i = 0; i < chart.length; i++) {
+                let noteData = chart[i];
+                if (!noteData.spawned && syncTime >= noteData.targetTime - fallTimeSec) {
+                    let el = document.createElement('div');
+                    el.classList.add('note');
+                    document.getElementById(`lane-${noteData.lane}`).appendChild(el);
+                    noteData.element = el;
+                    noteData.spawned = true;
+                    activeNotes.push(noteData);
+                }
+            }
+
+            for (let i = activeNotes.length - 1; i >= 0; i--) {
+                let note = activeNotes[i];
+                let timeDiff = note.targetTime - syncTime; 
+
+                if (timeDiff < -0.15) { 
+                    note.element.remove();
+                    activeNotes.splice(i, 1);
+                    showFeedback('MISS', 'red');
+                } else {
+                    let progress = (fallTimeSec - timeDiff) / fallTimeSec;
+                    let currentY = progress * judgmentY;
+                    note.element.style.top = currentY + 'px';
+                }
+            }
+            requestAnimationFrame(update);
+        }
+
+        function handleInput(laneIndex) {
+            if (!gameActive) return;
+            playTapSound(); 
+            judge(laneIndex);
+        }
+
+        // スマホ・PCマウス入力
+        document.querySelectorAll('.lane').forEach(lane => {
+            lane.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                handleInput(parseInt(lane.dataset.lane));
+            });
+            lane.addEventListener('mousedown', () => {
+                handleInput(parseInt(lane.dataset.lane));
+            });
+        });
+
+        // PCキーボード入力
+        const keys = { 'd': 0, 'k': 1 };
+        document.addEventListener('keydown', (e) => {
+            if (e.repeat) return; 
+            
+            // スペースキーまたはエンターキーでゲーム開始
+            if (!gameActive && (e.code === 'Space' || e.code === 'Enter')) {
+                startGame();
+                return;
+            }
+
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) {
+                handleInput(keys[key]);
+            }
+        });
+
+        function judge(laneIndex) {
+            let syncTime = bgm.currentTime + OFFSET_SEC;
+            let laneNotes = activeNotes.filter(n => n.lane === laneIndex);
+            if (laneNotes.length === 0) return;
+
+            laneNotes.sort((a, b) => Math.abs(a.targetTime - syncTime) - Math.abs(b.targetTime - syncTime));
+            let targetNote = laneNotes[0];
+            let diff = Math.abs(targetNote.targetTime - syncTime); 
+
+            if (diff < 0.1) { 
+                showFeedback('PERFECT!!', '#00ffcc');
+                score += 100;
+                hitNote(targetNote);
+            } else if (diff < 0.18) { 
+                showFeedback('GOOD', 'orange');
+                score += 50;
+                hitNote(targetNote);
+            }
+        }
+
+        function hitNote(note) {
+            note.element.style.backgroundColor = 'white';
+            note.element.style.boxShadow = '0 0 20px white';
+            setTimeout(() => {
+                if (note.element.parentNode) note.element.remove();
+            }, 50);
+            
+            let index = activeNotes.indexOf(note);
+            if(index > -1) activeNotes.splice(index, 1);
+            
+            scoreDisplay.innerText = score;
+        }
+
+        function showFeedback(text, color) {
+            feedbackDisplay.innerText = text;
+            feedbackDisplay.style.color = color;
+            clearTimeout(window.feedbackTimer);
+            window.feedbackTimer = setTimeout(() => { feedbackDisplay.innerText = ''; }, 400);
+        }
+    </script>
+</body>
+</html>
