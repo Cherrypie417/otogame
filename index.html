@@ -2,112 +2,183 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>音ゲー 試作品</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>スマホ対応2レーン音ゲー</title>
     <style>
         body {
             background-color: #111;
             color: white;
             font-family: sans-serif;
+            margin: 0;
             display: flex;
             flex-direction: column;
             align-items: center;
-            margin-top: 50px;
+            height: 100vh;
+            overflow: hidden;
+            /* タップ時のハイライトを消す */
+            -webkit-tap-highlight-color: transparent; 
+        }
+        #start-screen {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+        #start-btn {
+            padding: 15px 50px;
+            font-size: 24px;
+            font-weight: bold;
+            background-color: #00ffcc;
+            color: #000;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0,255,204,0.5);
         }
         #game-board {
             position: relative;
-            width: 400px;
-            height: 500px;
+            width: 100%;
+            max-width: 400px; /* スマホより大きい画面でも幅を制限 */
+            height: 100%;
             background-color: #222;
-            border: 2px solid #555;
-            overflow: hidden;
+            display: flex;
         }
         .lane {
-            position: absolute;
-            top: 0;
-            bottom: 0;
-            width: 100px;
+            position: relative;
+            flex: 1; /* 2レーンで画面を50%ずつに分割 */
+            height: 100%;
             border-right: 1px dashed #444;
             box-sizing: border-box;
+            touch-action: manipulation; /* ダブルタップズームなどを防止 */
         }
         .lane:last-child { border-right: none; }
-        .lane-0 { left: 0px; }
-        .lane-1 { left: 100px; }
-        .lane-2 { left: 200px; }
-        .lane-3 { left: 300px; }
-        
+
         #judgment-line {
             position: absolute;
-            bottom: 50px;
+            bottom: 15%;
             width: 100%;
-            height: 10px;
+            height: 5px;
             background-color: rgba(255, 255, 255, 0.5);
             z-index: 10;
         }
         .note {
             position: absolute;
-            width: 80px;
+            width: 80%;
             height: 20px;
             background-color: #00ffcc;
-            left: 10px; /* レーンの中央に寄せる */
+            left: 10%; /* レーンの中央に配置 */
             border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,255,204,0.8);
         }
-        #score-board {
-            margin-top: 20px;
-            font-size: 24px;
-        }
-        .key-hint {
+        #ui-layer {
             position: absolute;
-            bottom: 10px;
+            top: 20px;
             width: 100%;
+            max-width: 400px;
             text-align: center;
-            font-weight: bold;
-            color: #aaa;
+            z-index: 20;
+            pointer-events: none; /* UI部分のタップを無効化 */
+        }
+        #score-board { font-size: 28px; font-weight: bold; }
+        #feedback { height: 35px; font-size: 28px; font-weight: bold; color: yellow; margin-top: 5px; text-shadow: 0 0 5px #000; }
+        
+        .tap-area {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            height: 15%;
+            background-color: rgba(255, 255, 255, 0.05);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 18px;
+            color: #888;
+        }
+        .lane:active .tap-area {
+            background-color: rgba(255, 255, 255, 0.2);
         }
     </style>
 </head>
 <body>
 
-    <h1>Web Rhythm Game Prototype</h1>
+    <div id="start-screen">
+        <button id="start-btn">GAME START</button>
+        <p style="margin-top:20px; color:#ccc;">画面の左右をタップ<br>（PCは D / K キー）</p>
+    </div>
+
+    <div id="ui-layer">
+        <div id="score-board">SCORE: <span id="score">0</span></div>
+        <div id="feedback"></div>
+    </div>
     
     <div id="game-board">
-        <div class="lane lane-0"><div class="key-hint">D</div></div>
-        <div class="lane lane-1"><div class="key-hint">F</div></div>
-        <div class="lane lane-2"><div class="key-hint">J</div></div>
-        <div class="lane lane-3"><div class="key-hint">K</div></div>
-        
+        <div class="lane" id="lane-0" data-lane="0">
+            <div class="tap-area">TAP (L)</div>
+        </div>
+        <div class="lane" id="lane-1" data-lane="1">
+            <div class="tap-area">TAP (R)</div>
+        </div>
         <div id="judgment-line"></div>
     </div>
 
-    <div id="score-board">Score: <span id="score">0</span></div>
-    <div id="feedback" style="height: 30px; font-size: 20px; font-weight: bold; color: yellow; margin-top: 10px;"></div>
+    <audio id="bgm" src="radio_6890.mp3"></audio>
 
     <script>
         const gameBoard = document.getElementById('game-board');
         const scoreDisplay = document.getElementById('score');
         const feedbackDisplay = document.getElementById('feedback');
+        const bgm = document.getElementById('bgm');
+        const startScreen = document.getElementById('start-screen');
+        const startBtn = document.getElementById('start-btn');
         
         let score = 0;
         let notes = [];
-        const fallSpeed = 5; // ノーツの落ちるスピード
-        const judgmentY = 450; // 判定ラインのY座標（bottom: 50px なので 500-50）
+        let gameActive = false;
         
-        // キーボードとレーンの対応表
-        const keys = {
-            'd': 0,
-            'f': 1,
-            'j': 2,
-            'k': 3
-        };
+        // 画面サイズに応じた各種設定
+        let boardHeight = gameBoard.clientHeight;
+        let judgmentY = boardHeight * 0.85; // 判定ラインの位置
+        let fallSpeed = boardHeight / 60; // 落ちる速度
 
-        // ノーツを生成する関数
+        // 画面サイズが変化した時の調整
+        window.addEventListener('resize', () => {
+            boardHeight = gameBoard.clientHeight;
+            judgmentY = boardHeight * 0.85;
+            fallSpeed = boardHeight / 60;
+        });
+
+        // スタートボタンを押した時の処理
+        startBtn.addEventListener('click', () => {
+            startScreen.style.display = 'none';
+            gameActive = true;
+            
+            // 音楽の再生
+            bgm.currentTime = 0;
+            bgm.play();
+            
+            // ノーツを一定間隔（0.7秒ごと）で生成開始
+            setInterval(spawnNote, 700);
+            requestAnimationFrame(update);
+        });
+
+        // 音楽が終わったらゲーム終了
+        bgm.addEventListener('ended', () => {
+            gameActive = false;
+            showFeedback('FINISH!', '#fff');
+        });
+
         function spawnNote() {
-            const laneIndex = Math.floor(Math.random() * 4); // 0〜3のランダムなレーン
+            if (!gameActive) return;
+            const laneIndex = Math.floor(Math.random() * 2); // 0か1のランダム
             const noteEl = document.createElement('div');
             noteEl.classList.add('note');
             noteEl.style.top = '0px';
             
-            // 対象のレーンにノーツを追加
-            document.querySelector(`.lane-${laneIndex}`).appendChild(noteEl);
+            document.getElementById(`lane-${laneIndex}`).appendChild(noteEl);
             
             notes.push({
                 element: noteEl,
@@ -117,18 +188,19 @@
             });
         }
 
-        // ゲームループ（毎フレーム実行）
         function update() {
+            if (!gameActive) return;
+
             for (let i = 0; i < notes.length; i++) {
                 let note = notes[i];
                 if (!note.active) continue;
 
-                // ノーツを下に移動
+                // ノーツを下に落とす
                 note.y += fallSpeed;
                 note.element.style.top = note.y + 'px';
 
-                // 画面外に出たらミス判定で消す
-                if (note.y > 500) {
+                // 画面外に出た場合のミス判定
+                if (note.y > boardHeight) {
                     note.element.remove();
                     note.active = false;
                     showFeedback('MISS', 'red');
@@ -137,28 +209,46 @@
             requestAnimationFrame(update);
         }
 
-        // キー入力判定
+        // タッチ操作＆クリック操作の登録
+        document.querySelectorAll('.lane').forEach(lane => {
+            // スマホ用のタップ処理
+            lane.addEventListener('touchstart', (e) => {
+                e.preventDefault(); // 画面のスクロールなどを防ぐ
+                judge(parseInt(lane.dataset.lane));
+            });
+            // PC用のクリック処理
+            lane.addEventListener('mousedown', () => {
+                judge(parseInt(lane.dataset.lane));
+            });
+        });
+
+        // PCテスト用のキーボード操作（Dキー、Kキー）
+        const keys = { 'd': 0, 'k': 1 };
         document.addEventListener('keydown', (e) => {
             const key = e.key.toLowerCase();
             if (keys.hasOwnProperty(key)) {
-                const lane = keys[key];
-                judge(lane);
+                judge(keys[key]);
             }
         });
 
+        // 判定処理
         function judge(laneIndex) {
-            // そのレーンにある一番下の有効なノーツを探す
+            if (!gameActive) return;
+
+            // そのレーンにある一番下の有効なノーツを取得
             let targetNote = notes.find(n => n.active && n.lane === laneIndex);
             
             if (targetNote) {
-                const diff = Math.abs(targetNote.y + 10 - judgmentY); // +10はノーツの高さの半分
-                
-                if (diff < 20) {
+                // ノーツと判定ラインの距離を計算
+                const diff = Math.abs((targetNote.y + 10) - judgmentY);
+                const tolerance = boardHeight * 0.15; // 判定の甘さ
+
+                if (diff < tolerance * 0.3) {
                     showFeedback('PERFECT!!', '#00ffcc');
                     score += 100;
                     hitNote(targetNote);
-                } else if (diff < 50) {
-                    showFeedback('GOOD!', 'orange');
+                } else if (diff < tolerance) {
+                    showFeedback('GOOD', 'orange');
                     score += 50;
                     hitNote(targetNote);
                 }
@@ -168,22 +258,17 @@
         function hitNote(note) {
             note.active = false;
             note.element.style.backgroundColor = 'white';
-            setTimeout(() => note.element.remove(), 50); // 一瞬光って消える演出
+            note.element.style.boxShadow = '0 0 20px white';
+            setTimeout(() => note.element.remove(), 50); // 一瞬光って消す
             scoreDisplay.innerText = score;
         }
 
         function showFeedback(text, color) {
             feedbackDisplay.innerText = text;
             feedbackDisplay.style.color = color;
-            // 古いタイマーをクリアして文字を消す
             clearTimeout(window.feedbackTimer);
             window.feedbackTimer = setTimeout(() => { feedbackDisplay.innerText = ''; }, 500);
         }
-
-        // 1秒ごとにノーツを生成してゲーム開始
-        setInterval(spawnNote, 1000);
-        update();
-
     </script>
 </body>
 </html>
