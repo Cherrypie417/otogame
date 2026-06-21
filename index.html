@@ -220,7 +220,7 @@
         }
 
         function playTapSound() {
-            if (!audioCtx || !tapBuffer) return; // 準備ができていなければ鳴らさない
+            if (!audioCtx || !tapBuffer) return; // 準備ができていなければ鳴らさな
             
             const source = audioCtx.createBufferSource();
             source.buffer = tapBuffer;
