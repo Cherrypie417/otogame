@@ -122,4 +122,292 @@
             height: 100px;
             background: #333;
             color: #00ffcc;
-            border: 1px solid #55
+            border: 1px solid #555;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 14px;
+            resize: none;
+        }
+        #copy-btn {
+            margin-top: 10px;
+            padding: 10px 30px;
+            background: #ffcc00;
+            color: #000;
+            border: none;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="start-screen">
+        <button id="start-btn">GAME START</button>
+        <p style="margin-top:20px; color:#ccc;">画面の左右をタップ<br>（PCは D / K キー、またはスペース）</p>
+    </div>
+
+    <div id="ui-layer">
+        <div id="score-board">SCORE: <span id="score">0</span></div>
+        <div id="feedback"></div>
+    </div>
+    
+    <div id="game-board">
+        <div class="lane" id="lane-0" data-lane="0"><div class="tap-area">TAP (L)</div></div>
+        <div class="lane" id="lane-1" data-lane="1"><div class="tap-area">TAP (R)</div></div>
+        <div id="judgment-line"></div>
+    </div>
+
+    <div id="record-ui">
+        <div style="font-size: 12px; margin-bottom: 5px; color: #aaa;">👇 叩いたタイミングがここに記録されます 👇</div>
+        <textarea id="record-text" readonly placeholder="ゲーム中にタップすると記録が始まります"></textarea>
+        <button id="copy-btn">コピーする</button>
+    </div>
+
+    <audio id="bgm" src="radio_6890.mp3"></audio>
+
+    <script>
+        // ==========================================
+        // 🛠️ あなたのオリジナル譜面データ
+        // まずはここを「空っぽ」にして録音に集中しましょう！
+        // ==========================================
+        const myCustomChart = [
+            // ここにコピーしたデータを貼り付けます
+        ];
+
+        const fallTimeSec = 1.0; 
+        const OFFSET_SEC = 0.0;     
+
+        const gameBoard = document.getElementById('game-board');
+        const scoreDisplay = document.getElementById('score');
+        const feedbackDisplay = document.getElementById('feedback');
+        const bgm = document.getElementById('bgm');
+        const startScreen = document.getElementById('start-screen');
+        const startBtn = document.getElementById('start-btn');
+        const recordText = document.getElementById('record-text');
+        const copyBtn = document.getElementById('copy-btn');
+        
+        let score = 0;
+        let chart = [];       
+        let activeNotes = []; 
+        let gameActive = false;
+        
+        // 📝 記録用の配列
+        let recordedData = [];
+        
+        let boardHeight = gameBoard.clientHeight;
+        let judgmentY = boardHeight * 0.85; 
+
+        let audioCtx;
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playTapSound() {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.type = 'triangle'; 
+            osc.frequency.setValueAtTime(800, audioCtx.currentTime); 
+            osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1); 
+            gain.gain.setValueAtTime(0.4, audioCtx.currentTime); 
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1); 
+            osc.start(audioCtx.currentTime);
+            osc.stop(audioCtx.currentTime + 0.1);
+        }
+
+        window.addEventListener('resize', () => {
+            boardHeight = gameBoard.clientHeight;
+            judgmentY = boardHeight * 0.85;
+        });
+
+        function loadCustomChart() {
+            chart = myCustomChart.map(data => {
+                return {
+                    targetTime: data.time,
+                    lane: data.lane,
+                    spawned: false,
+                    element: null
+                };
+            });
+            chart.sort((a, b) => a.targetTime - b.targetTime);
+        }
+
+        function startGame() {
+            if (gameActive) return; 
+            
+            initAudio(); 
+            startScreen.style.display = 'none';
+            score = 0;
+            scoreDisplay.innerText = score;
+            
+            // レコーディングデータをリセット
+            recordedData = [];
+            recordText.value = "";
+            
+            activeNotes.forEach(note => {
+                if (note.element && note.element.parentNode) {
+                    note.element.remove();
+                }
+            });
+            activeNotes = []; 
+
+            loadCustomChart(); 
+            
+            gameActive = true;
+            bgm.currentTime = 0;
+            bgm.play();
+            
+            requestAnimationFrame(update);
+        }
+
+        startBtn.addEventListener('click', startGame);
+        startBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            startGame();
+        });
+
+        bgm.addEventListener('ended', () => {
+            gameActive = false;
+            showFeedback('FINISH!', '#fff');
+            
+            setTimeout(() => {
+                startScreen.style.display = 'flex';
+            }, 2000);
+        });
+
+        function update() {
+            if (!gameActive) return;
+            let syncTime = bgm.currentTime + OFFSET_SEC;
+
+            for (let i = 0; i < chart.length; i++) {
+                let noteData = chart[i];
+                if (!noteData.spawned && syncTime >= noteData.targetTime - fallTimeSec) {
+                    let el = document.createElement('div');
+                    el.classList.add('note');
+                    document.getElementById(`lane-${noteData.lane}`).appendChild(el);
+                    noteData.element = el;
+                    noteData.spawned = true;
+                    activeNotes.push(noteData);
+                }
+            }
+
+            for (let i = activeNotes.length - 1; i >= 0; i--) {
+                let note = activeNotes[i];
+                let timeDiff = note.targetTime - syncTime; 
+
+                if (timeDiff < -0.15) { 
+                    note.element.remove();
+                    activeNotes.splice(i, 1);
+                    showFeedback('MISS', 'red');
+                } else {
+                    let progress = (fallTimeSec - timeDiff) / fallTimeSec;
+                    let currentY = progress * judgmentY;
+                    note.element.style.top = currentY + 'px';
+                }
+            }
+            requestAnimationFrame(update);
+        }
+
+        function handleInput(laneIndex) {
+            if (!gameActive) return;
+            playTapSound(); 
+            
+            // 📝 ここで叩いた時間を記録！
+            // 小数点第2位までに丸めて配列の形式にする
+            let tapTime = (bgm.currentTime + OFFSET_SEC).toFixed(2);
+            let dataString = `{ time: ${tapTime}, lane: ${laneIndex} }`;
+            recordedData.push(dataString);
+            
+            // テキストエリアに表示して一番下までスクロール
+            recordText.value = recordedData.join(",\n");
+            recordText.scrollTop = recordText.scrollHeight;
+
+            judge(laneIndex);
+        }
+
+        document.querySelectorAll('.lane').forEach(lane => {
+            lane.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                handleInput(parseInt(lane.dataset.lane));
+            });
+            lane.addEventListener('mousedown', () => {
+                handleInput(parseInt(lane.dataset.lane));
+            });
+        });
+
+        const keys = { 'd': 0, 'k': 1 };
+        document.addEventListener('keydown', (e) => {
+            if (e.repeat) return; 
+            if (!gameActive && (e.code === 'Space' || e.code === 'Enter')) {
+                startGame();
+                return;
+            }
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) {
+                handleInput(keys[key]);
+            }
+        });
+
+        function judge(laneIndex) {
+            let syncTime = bgm.currentTime + OFFSET_SEC;
+            let laneNotes = activeNotes.filter(n => n.lane === laneIndex);
+            if (laneNotes.length === 0) return;
+
+            laneNotes.sort((a, b) => Math.abs(a.targetTime - syncTime) - Math.abs(b.targetTime - syncTime));
+            let targetNote = laneNotes[0];
+            let diff = Math.abs(targetNote.targetTime - syncTime); 
+
+            if (diff < 0.1) { 
+                showFeedback('PERFECT!!', '#00ffcc');
+                score += 100;
+                hitNote(targetNote);
+            } else if (diff < 0.18) { 
+                showFeedback('GOOD', 'orange');
+                score += 50;
+                hitNote(targetNote);
+            }
+        }
+
+        function hitNote(note) {
+            note.element.style.filter = 'brightness(200%)';
+            setTimeout(() => {
+                if (note.element.parentNode) note.element.remove();
+            }, 50);
+            
+            let index = activeNotes.indexOf(note);
+            if(index > -1) activeNotes.splice(index, 1);
+            
+            scoreDisplay.innerText = score;
+        }
+
+        function showFeedback(text, color) {
+            feedbackDisplay.innerText = text;
+            feedbackDisplay.style.color = color;
+            clearTimeout(window.feedbackTimer);
+            window.feedbackTimer = setTimeout(() => { feedbackDisplay.innerText = ''; }, 400);
+        }
+
+        // 📋 コピーボタンの処理
+        copyBtn.addEventListener('click', () => {
+            if (recordText.value === "") {
+                alert("まだ記録されたデータがありません！");
+                return;
+            }
+            navigator.clipboard.writeText(recordText.value).then(() => {
+                alert("コピーしました！\nコード内の myCustomChart の中に貼り付けてください。");
+            }).catch(err => {
+                alert("コピーに失敗しました。手動でテキストを選択してコピーしてください。");
+            });
+        });
+    </script>
+</body>
+</html>
