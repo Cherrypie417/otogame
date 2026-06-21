@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>スマホ対応2レーン音ゲー (カスタム譜面版)</title>
+    <title>スマホ対応2レーン音ゲー (譜面レコーダー搭載)</title>
     <style>
         body {
             background-color: #111;
@@ -42,7 +42,8 @@
             position: relative;
             width: 100%;
             max-width: 400px; 
-            height: 100%;
+            /* レコーディングエリアのスペースを空けるため少し高さを縮めます */
+            height: 65vh; 
             background-color: #222;
             display: flex;
         }
@@ -65,34 +66,30 @@
             z-index: 10;
         }
         
-        /* 🐶 ノーツを画像（dog.png）に変更 */
         .note {
             position: absolute;
-            width: 60px;  /* 画像が見やすいように大きく */
+            width: 60px;
             height: 60px;
             left: 50%; 
-            margin-left: -30px; /* 中央に配置するための微調整 */
-            
-            /* 画像の指定 */
+            margin-left: -30px; 
             background-image: url('dog.png');
             background-size: contain;
             background-repeat: no-repeat;
             background-position: center;
-            
             transform: translateY(-50%);
         }
 
         #ui-layer {
             position: absolute;
-            top: 20px;
+            top: 10px;
             width: 100%;
             max-width: 400px;
             text-align: center;
             z-index: 20;
             pointer-events: none; 
         }
-        #score-board { font-size: 28px; font-weight: bold; }
-        #feedback { height: 35px; font-size: 28px; font-weight: bold; color: yellow; margin-top: 5px; text-shadow: 0 0 5px #000; }
+        #score-board { font-size: 24px; font-weight: bold; }
+        #feedback { height: 30px; font-size: 24px; font-weight: bold; color: yellow; margin-top: 5px; text-shadow: 0 0 5px #000; }
         
         .tap-area {
             position: absolute;
@@ -109,252 +106,20 @@
         .lane:active .tap-area {
             background-color: rgba(255, 255, 255, 0.2);
         }
-    </style>
-</head>
-<body>
 
-    <div id="start-screen">
-        <button id="start-btn">GAME START</button>
-        <p style="margin-top:20px; color:#ccc;">画面の左右をタップ<br>（PCは D / K キー、またはスペース）</p>
-    </div>
-
-    <div id="ui-layer">
-        <div id="score-board">SCORE: <span id="score">0</span></div>
-        <div id="feedback"></div>
-    </div>
-    
-    <div id="game-board">
-        <div class="lane" id="lane-0" data-lane="0"><div class="tap-area">TAP (L)</div></div>
-        <div class="lane" id="lane-1" data-lane="1"><div class="tap-area">TAP (R)</div></div>
-        <div id="judgment-line"></div>
-    </div>
-
-    <audio id="bgm" src="radio_6890.mp3"></audio>
-
-    <script>
-        // ==========================================
-        // 🛠️ あなたのオリジナル譜面データ
-        // time: ノーツを叩く時間（秒）
-        // lane: 0（左レーン） または 1（右レーン）
-        // ==========================================
-        const myCustomChart = [
-            { time: 2.0, lane: 0 },
-            { time: 2.5, lane: 1 },
-            { time: 3.0, lane: 0 },
-            { time: 3.5, lane: 1 },
-            { time: 4.0, lane: 0 },
-            { time: 4.2, lane: 1 }, // トトッという連打の例
-            { time: 4.4, lane: 0 },
-            { time: 5.0, lane: 1 }
-            // 曲を聴きながら、ここにどんどん追加してください！
-        ];
-
-        const fallTimeSec = 1.0; 
-        const OFFSET_SEC = 0.0;     
-
-        const gameBoard = document.getElementById('game-board');
-        const scoreDisplay = document.getElementById('score');
-        const feedbackDisplay = document.getElementById('feedback');
-        const bgm = document.getElementById('bgm');
-        const startScreen = document.getElementById('start-screen');
-        const startBtn = document.getElementById('start-btn');
-        
-        let score = 0;
-        let chart = [];       
-        let activeNotes = []; 
-        let gameActive = false;
-        
-        let boardHeight = gameBoard.clientHeight;
-        let judgmentY = boardHeight * 0.85; 
-
-        let audioCtx;
-        function initAudio() {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
+        /* 📝 レコーディング用のUIスタイル */
+        #record-ui {
+            width: 100%;
+            max-width: 400px;
+            padding: 10px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
-
-        function playTapSound() {
-            if (!audioCtx) return;
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.type = 'triangle'; 
-            osc.frequency.setValueAtTime(800, audioCtx.currentTime); 
-            osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1); 
-            gain.gain.setValueAtTime(0.4, audioCtx.currentTime); 
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1); 
-            osc.start(audioCtx.currentTime);
-            osc.stop(audioCtx.currentTime + 0.1);
-        }
-
-        window.addEventListener('resize', () => {
-            boardHeight = gameBoard.clientHeight;
-            judgmentY = boardHeight * 0.85;
-        });
-
-        // 📝 自動生成をやめて、手動データを読み込む関数に変更
-        function loadCustomChart() {
-            // あなたが書いた myCustomChart のデータをゲーム用の配列に変換
-            chart = myCustomChart.map(data => {
-                return {
-                    targetTime: data.time,
-                    lane: data.lane,
-                    spawned: false,
-                    element: null
-                };
-            });
-            // 念のため時間順に並べ替え
-            chart.sort((a, b) => a.targetTime - b.targetTime);
-        }
-
-        function startGame() {
-            if (gameActive) return; 
-            
-            initAudio(); 
-            startScreen.style.display = 'none';
-            score = 0;
-            scoreDisplay.innerText = score;
-            
-            // 🐛 2回目プレイ時のバグ修正：画面に残った古いノーツを消す
-            activeNotes.forEach(note => {
-                if (note.element && note.element.parentNode) {
-                    note.element.remove();
-                }
-            });
-            activeNotes = []; 
-
-            loadCustomChart(); 
-            
-            gameActive = true;
-            bgm.currentTime = 0;
-            bgm.play();
-            
-            requestAnimationFrame(update);
-        }
-
-        startBtn.addEventListener('click', startGame);
-        startBtn.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            startGame();
-        });
-
-        // 🐛 2回目プレイ時のバグ修正：曲が終わったらスタート画面を復活させる
-        bgm.addEventListener('ended', () => {
-            gameActive = false;
-            showFeedback('FINISH!', '#fff');
-            
-            // 2秒後にスタート画面を再表示
-            setTimeout(() => {
-                startScreen.style.display = 'flex';
-            }, 2000);
-        });
-
-        function update() {
-            if (!gameActive) return;
-            let syncTime = bgm.currentTime + OFFSET_SEC;
-
-            for (let i = 0; i < chart.length; i++) {
-                let noteData = chart[i];
-                if (!noteData.spawned && syncTime >= noteData.targetTime - fallTimeSec) {
-                    let el = document.createElement('div');
-                    el.classList.add('note');
-                    document.getElementById(`lane-${noteData.lane}`).appendChild(el);
-                    noteData.element = el;
-                    noteData.spawned = true;
-                    activeNotes.push(noteData);
-                }
-            }
-
-            for (let i = activeNotes.length - 1; i >= 0; i--) {
-                let note = activeNotes[i];
-                let timeDiff = note.targetTime - syncTime; 
-
-                if (timeDiff < -0.15) { 
-                    note.element.remove();
-                    activeNotes.splice(i, 1);
-                    showFeedback('MISS', 'red');
-                } else {
-                    let progress = (fallTimeSec - timeDiff) / fallTimeSec;
-                    let currentY = progress * judgmentY;
-                    note.element.style.top = currentY + 'px';
-                }
-            }
-            requestAnimationFrame(update);
-        }
-
-        function handleInput(laneIndex) {
-            if (!gameActive) return;
-            playTapSound(); 
-            judge(laneIndex);
-        }
-
-        document.querySelectorAll('.lane').forEach(lane => {
-            lane.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                handleInput(parseInt(lane.dataset.lane));
-            });
-            lane.addEventListener('mousedown', () => {
-                handleInput(parseInt(lane.dataset.lane));
-            });
-        });
-
-        const keys = { 'd': 0, 'k': 1 };
-        document.addEventListener('keydown', (e) => {
-            if (e.repeat) return; 
-            if (!gameActive && (e.code === 'Space' || e.code === 'Enter')) {
-                startGame();
-                return;
-            }
-            const key = e.key.toLowerCase();
-            if (keys.hasOwnProperty(key)) {
-                handleInput(keys[key]);
-            }
-        });
-
-        function judge(laneIndex) {
-            let syncTime = bgm.currentTime + OFFSET_SEC;
-            let laneNotes = activeNotes.filter(n => n.lane === laneIndex);
-            if (laneNotes.length === 0) return;
-
-            laneNotes.sort((a, b) => Math.abs(a.targetTime - syncTime) - Math.abs(b.targetTime - syncTime));
-            let targetNote = laneNotes[0];
-            let diff = Math.abs(targetNote.targetTime - syncTime); 
-
-            if (diff < 0.1) { 
-                showFeedback('PERFECT!!', '#00ffcc');
-                score += 100;
-                hitNote(targetNote);
-            } else if (diff < 0.18) { 
-                showFeedback('GOOD', 'orange');
-                score += 50;
-                hitNote(targetNote);
-            }
-        }
-
-        function hitNote(note) {
-            // 画像なので色変更ではなく少し明るくするエフェクトに
-            note.element.style.filter = 'brightness(200%)';
-            setTimeout(() => {
-                if (note.element.parentNode) note.element.remove();
-            }, 50);
-            
-            let index = activeNotes.indexOf(note);
-            if(index > -1) activeNotes.splice(index, 1);
-            
-            scoreDisplay.innerText = score;
-        }
-
-        function showFeedback(text, color) {
-            feedbackDisplay.innerText = text;
-            feedbackDisplay.style.color = color;
-            clearTimeout(window.feedbackTimer);
-            window.feedbackTimer = setTimeout(() => { feedbackDisplay.innerText = ''; }, 400);
-        }
-    </script>
-</body>
-</html>
+        #record-text {
+            width: 100%;
+            height: 100px;
+            background: #333;
+            color: #00ffcc;
+            border: 1px solid #55
