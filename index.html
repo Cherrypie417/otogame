@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>スマホ対応2レーン音ゲー (BPM150・難易度中)</title>
+    <title>スマホ対応2レーン音ゲー (カスタム譜面版)</title>
     <style>
         body {
             background-color: #111;
@@ -64,16 +64,24 @@
             background-color: rgba(255, 255, 255, 0.5);
             z-index: 10;
         }
+        
+        /* 🐶 ノーツを画像（dog.png）に変更 */
         .note {
             position: absolute;
-            width: 80%;
-            height: 20px;
-            background-color: #00ffcc;
-            left: 10%; 
-            border-radius: 4px;
-            box-shadow: 0 0 8px rgba(0,255,204,0.8);
+            width: 60px;  /* 画像が見やすいように大きく */
+            height: 60px;
+            left: 50%; 
+            margin-left: -30px; /* 中央に配置するための微調整 */
+            
+            /* 画像の指定 */
+            background-image: url('dog.png');
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            
             transform: translateY(-50%);
         }
+
         #ui-layer {
             position: absolute;
             top: 20px;
@@ -107,7 +115,7 @@
 
     <div id="start-screen">
         <button id="start-btn">GAME START</button>
-        <p style="margin-top:20px; color:#ccc;">画面の左右をタップ<br>（PCは D / K キー）<br>※PCはスペースキーでも開始できます</p>
+        <p style="margin-top:20px; color:#ccc;">画面の左右をタップ<br>（PCは D / K キー、またはスペース）</p>
     </div>
 
     <div id="ui-layer">
@@ -125,17 +133,24 @@
 
     <script>
         // ==========================================
-        // ⚙️ ゲームの各種設定
+        // 🛠️ あなたのオリジナル譜面データ
+        // time: ノーツを叩く時間（秒）
+        // lane: 0（左レーン） または 1（右レーン）
         // ==========================================
-        // 教えていただいたBPM150に設定しました！
-        const BPM = 150;             
+        const myCustomChart = [
+            { time: 2.0, lane: 0 },
+            { time: 2.5, lane: 1 },
+            { time: 3.0, lane: 0 },
+            { time: 3.5, lane: 1 },
+            { time: 4.0, lane: 0 },
+            { time: 4.2, lane: 1 }, // トトッという連打の例
+            { time: 4.4, lane: 0 },
+            { time: 5.0, lane: 1 }
+            // 曲を聴きながら、ここにどんどん追加してください！
+        ];
+
         const fallTimeSec = 1.0; 
-        
-        // ⏱️ 音ズレ調整（秒数）
-        // 音楽よりノーツが「遅れて」降ってくる場合はプラス（例: 0.1）
-        // 音楽よりノーツが「早く」降ってくる場合はマイナス（例: -0.1）
         const OFFSET_SEC = 0.0;     
-        // ==========================================
 
         const gameBoard = document.getElementById('game-board');
         const scoreDisplay = document.getElementById('score');
@@ -152,9 +167,7 @@
         let boardHeight = gameBoard.clientHeight;
         let judgmentY = boardHeight * 0.85; 
 
-        // 🔊 Web Audio API（遅延ゼロのタップ音用）
         let audioCtx;
-
         function initAudio() {
             if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -164,21 +177,17 @@
             }
         }
 
-        // タップ音を「チッ」というハッキリした音に改良
         function playTapSound() {
             if (!audioCtx) return;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.connect(gain);
             gain.connect(audioCtx.destination);
-            
-            osc.type = 'triangle'; // より耳に残りやすい波形
-            osc.frequency.setValueAtTime(800, audioCtx.currentTime); // 高めの音から
-            osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1); // 急激に下げる
-            
-            gain.gain.setValueAtTime(0.4, audioCtx.currentTime); // 音量を少し上げる
+            osc.type = 'triangle'; 
+            osc.frequency.setValueAtTime(800, audioCtx.currentTime); 
+            osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1); 
+            gain.gain.setValueAtTime(0.4, audioCtx.currentTime); 
             gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1); 
-            
             osc.start(audioCtx.currentTime);
             osc.stop(audioCtx.currentTime + 0.1);
         }
@@ -188,52 +197,38 @@
             judgmentY = boardHeight * 0.85;
         });
 
-        // 🎼 程よい難易度の譜面パターン（連打を減らしました）
-        function generateChart() {
-            chart = [];
-            const secPerBeat = 60 / BPM;              
-            const secPerMeasure = secPerBeat * 4;     
-            const totalMeasures = 100;                
-
-            // 1小節の中で「どこにノーツを置くか」のパターン（16分割）
-            // 密度を大幅に下げ、基本は四つ打ちや裏打ちにしています
-            const patterns = [
-                [0, 8],                   // 2つ（スッカスカな休憩地帯）
-                [0, 4, 8, 12],            // 4つ（等間隔の基本リズム）
-                [0, 8, 12],               // 3つ（タン・休・タン・タン）
-                [0, 4, 8],                // 3つ（タン・タン・タン・休）
-                [0, 6, 8, 12],            // 4つ（少しだけハネるリズム）
-                [0, 8, 10, 12]            // 4つ（後半に軽快なタタン）
-            ];
-
-            for (let m = 0; m < totalMeasures; m++) {
-                let measureStartTime = m * secPerMeasure;
-                let selectedPattern = patterns[Math.floor(Math.random() * patterns.length)];
-
-                for (let slot of selectedPattern) {
-                    let time = measureStartTime + slot * (secPerMeasure / 16);
-                    if (time > 2.0) {
-                        chart.push({
-                            targetTime: time,
-                            lane: Math.floor(Math.random() * 2),
-                            spawned: false,
-                            element: null
-                        });
-                    }
-                }
-            }
+        // 📝 自動生成をやめて、手動データを読み込む関数に変更
+        function loadCustomChart() {
+            // あなたが書いた myCustomChart のデータをゲーム用の配列に変換
+            chart = myCustomChart.map(data => {
+                return {
+                    targetTime: data.time,
+                    lane: data.lane,
+                    spawned: false,
+                    element: null
+                };
+            });
+            // 念のため時間順に並べ替え
             chart.sort((a, b) => a.targetTime - b.targetTime);
         }
 
-        // ゲーム開始処理を関数化（クリックでもキーボードでも呼べるように）
         function startGame() {
-            if (gameActive) return; // 既に始まっていたら無視
+            if (gameActive) return; 
             
             initAudio(); 
             startScreen.style.display = 'none';
             score = 0;
             scoreDisplay.innerText = score;
-            generateChart(); 
+            
+            // 🐛 2回目プレイ時のバグ修正：画面に残った古いノーツを消す
+            activeNotes.forEach(note => {
+                if (note.element && note.element.parentNode) {
+                    note.element.remove();
+                }
+            });
+            activeNotes = []; 
+
+            loadCustomChart(); 
             
             gameActive = true;
             bgm.currentTime = 0;
@@ -242,16 +237,21 @@
             requestAnimationFrame(update);
         }
 
-        // ボタンのクリック/タップで開始
         startBtn.addEventListener('click', startGame);
         startBtn.addEventListener('touchstart', (e) => {
             e.preventDefault();
             startGame();
         });
 
+        // 🐛 2回目プレイ時のバグ修正：曲が終わったらスタート画面を復活させる
         bgm.addEventListener('ended', () => {
             gameActive = false;
             showFeedback('FINISH!', '#fff');
+            
+            // 2秒後にスタート画面を再表示
+            setTimeout(() => {
+                startScreen.style.display = 'flex';
+            }, 2000);
         });
 
         function update() {
@@ -293,7 +293,6 @@
             judge(laneIndex);
         }
 
-        // スマホ・PCマウス入力
         document.querySelectorAll('.lane').forEach(lane => {
             lane.addEventListener('touchstart', (e) => {
                 e.preventDefault();
@@ -304,17 +303,13 @@
             });
         });
 
-        // PCキーボード入力
         const keys = { 'd': 0, 'k': 1 };
         document.addEventListener('keydown', (e) => {
             if (e.repeat) return; 
-            
-            // スペースキーまたはエンターキーでゲーム開始
             if (!gameActive && (e.code === 'Space' || e.code === 'Enter')) {
                 startGame();
                 return;
             }
-
             const key = e.key.toLowerCase();
             if (keys.hasOwnProperty(key)) {
                 handleInput(keys[key]);
@@ -342,8 +337,8 @@
         }
 
         function hitNote(note) {
-            note.element.style.backgroundColor = 'white';
-            note.element.style.boxShadow = '0 0 20px white';
+            // 画像なので色変更ではなく少し明るくするエフェクトに
+            note.element.style.filter = 'brightness(200%)';
             setTimeout(() => {
                 if (note.element.parentNode) note.element.remove();
             }, 50);
