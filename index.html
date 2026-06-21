@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>音ゲー 試作品</title>
+    <style>
+        body {
+            background-color: #111;
+            color: white;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 50px;
+        }
+        #game-board {
+            position: relative;
+            width: 400px;
+            height: 500px;
+            background-color: #222;
+            border: 2px solid #555;
+            overflow: hidden;
+        }
+        .lane {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100px;
+            border-right: 1px dashed #444;
+            box-sizing: border-box;
+        }
+        .lane:last-child { border-right: none; }
+        .lane-0 { left: 0px; }
+        .lane-1 { left: 100px; }
+        .lane-2 { left: 200px; }
+        .lane-3 { left: 300px; }
+        
+        #judgment-line {
+            position: absolute;
+            bottom: 50px;
+            width: 100%;
+            height: 10px;
+            background-color: rgba(255, 255, 255, 0.5);
+            z-index: 10;
+        }
+        .note {
+            position: absolute;
+            width: 80px;
+            height: 20px;
+            background-color: #00ffcc;
+            left: 10px; /* レーンの中央に寄せる */
+            border-radius: 5px;
+        }
+        #score-board {
+            margin-top: 20px;
+            font-size: 24px;
+        }
+        .key-hint {
+            position: absolute;
+            bottom: 10px;
+            width: 100%;
+            text-align: center;
+            font-weight: bold;
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Web Rhythm Game Prototype</h1>
+    
+    <div id="game-board">
+        <div class="lane lane-0"><div class="key-hint">D</div></div>
+        <div class="lane lane-1"><div class="key-hint">F</div></div>
+        <div class="lane lane-2"><div class="key-hint">J</div></div>
+        <div class="lane lane-3"><div class="key-hint">K</div></div>
+        
+        <div id="judgment-line"></div>
+    </div>
+
+    <div id="score-board">Score: <span id="score">0</span></div>
+    <div id="feedback" style="height: 30px; font-size: 20px; font-weight: bold; color: yellow; margin-top: 10px;"></div>
+
+    <script>
+        const gameBoard = document.getElementById('game-board');
+        const scoreDisplay = document.getElementById('score');
+        const feedbackDisplay = document.getElementById('feedback');
+        
+        let score = 0;
+        let notes = [];
+        const fallSpeed = 5; // ノーツの落ちるスピード
+        const judgmentY = 450; // 判定ラインのY座標（bottom: 50px なので 500-50）
+        
+        // キーボードとレーンの対応表
+        const keys = {
+            'd': 0,
+            'f': 1,
+            'j': 2,
+            'k': 3
+        };
+
+        // ノーツを生成する関数
+        function spawnNote() {
+            const laneIndex = Math.floor(Math.random() * 4); // 0〜3のランダムなレーン
+            const noteEl = document.createElement('div');
+            noteEl.classList.add('note');
+            noteEl.style.top = '0px';
+            
+            // 対象のレーンにノーツを追加
+            document.querySelector(`.lane-${laneIndex}`).appendChild(noteEl);
+            
+            notes.push({
+                element: noteEl,
+                y: 0,
+                lane: laneIndex,
+                active: true
+            });
+        }
+
+        // ゲームループ（毎フレーム実行）
+        function update() {
+            for (let i = 0; i < notes.length; i++) {
+                let note = notes[i];
+                if (!note.active) continue;
+
+                // ノーツを下に移動
+                note.y += fallSpeed;
+                note.element.style.top = note.y + 'px';
+
+                // 画面外に出たらミス判定で消す
+                if (note.y > 500) {
+                    note.element.remove();
+                    note.active = false;
+                    showFeedback('MISS', 'red');
+                }
+            }
+            requestAnimationFrame(update);
+        }
+
+        // キー入力判定
+        document.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) {
+                const lane = keys[key];
+                judge(lane);
+            }
+        });
+
+        function judge(laneIndex) {
+            // そのレーンにある一番下の有効なノーツを探す
+            let targetNote = notes.find(n => n.active && n.lane === laneIndex);
+            
+            if (targetNote) {
+                const diff = Math.abs(targetNote.y + 10 - judgmentY); // +10はノーツの高さの半分
+                
+                if (diff < 20) {
+                    showFeedback('PERFECT!!', '#00ffcc');
+                    score += 100;
+                    hitNote(targetNote);
+                } else if (diff < 50) {
+                    showFeedback('GOOD!', 'orange');
+                    score += 50;
+                    hitNote(targetNote);
+                }
+            }
+        }
+
+        function hitNote(note) {
+            note.active = false;
+            note.element.style.backgroundColor = 'white';
+            setTimeout(() => note.element.remove(), 50); // 一瞬光って消える演出
+            scoreDisplay.innerText = score;
+        }
+
+        function showFeedback(text, color) {
+            feedbackDisplay.innerText = text;
+            feedbackDisplay.style.color = color;
+            // 古いタイマーをクリアして文字を消す
+            clearTimeout(window.feedbackTimer);
+            window.feedbackTimer = setTimeout(() => { feedbackDisplay.innerText = ''; }, 500);
+        }
+
+        // 1秒ごとにノーツを生成してゲーム開始
+        setInterval(spawnNote, 1000);
+        update();
+
+    </script>
+</body>
+</html>
