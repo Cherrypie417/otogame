@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>スマホ対応2レーン音ゲー (BPM同期版)</title>
+    <title>スマホ対応2レーン音ゲー (連打強化版)</title>
     <style>
         body {
             background-color: #111;
@@ -31,12 +31,12 @@
             padding: 15px 50px;
             font-size: 24px;
             font-weight: bold;
-            background-color: #00ffcc;
-            color: #000;
+            background-color: #ff3366; /* ボタンの色を少しハードに */
+            color: #fff;
             border: none;
             border-radius: 10px;
             cursor: pointer;
-            box-shadow: 0 4px 10px rgba(0,255,204,0.5);
+            box-shadow: 0 4px 10px rgba(255,51,102,0.5);
         }
         #game-board {
             position: relative;
@@ -67,12 +67,11 @@
         .note {
             position: absolute;
             width: 80%;
-            height: 20px;
+            height: 18px; /* 連打を見やすくするため少し薄く */
             background-color: #00ffcc;
             left: 10%; 
-            border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0,255,204,0.8);
-            /* ノーツの基準点を中央にする */
+            border-radius: 4px;
+            box-shadow: 0 0 8px rgba(0,255,204,0.8);
             transform: translateY(-50%);
         }
         #ui-layer {
@@ -126,10 +125,11 @@
 
     <script>
         // ==========================================
-        // 🎵 楽曲の設定（ここを調整して曲に合わせます）
+        // 🎵 楽曲の設定
         // ==========================================
-        const BPM = 120;             // 曲のテンポ（適宜変更してください）
-        const fallTimeSec = 1.2;     // ノーツが画面上部から判定ラインに到達するまでの秒数
+        const BPM = 120;             
+        // 連打が見やすくなるように落下速度を上げました（数字を小さくすると速くなります）
+        const fallTimeSec = 0.85;     
         // ==========================================
 
         const gameBoard = document.getElementById('game-board');
@@ -140,4 +140,171 @@
         const startBtn = document.getElementById('start-btn');
         
         let score = 0;
-        let chart = [];
+        let chart = [];       
+        let activeNotes = []; 
+        let gameActive = false;
+        
+        let boardHeight = gameBoard.clientHeight;
+        let judgmentY = boardHeight * 0.85; 
+
+        window.addEventListener('resize', () => {
+            boardHeight = gameBoard.clientHeight;
+            judgmentY = boardHeight * 0.85;
+        });
+
+        // 🎼 連打マシマシの譜面生成ロジック
+        function generateChart() {
+            chart = [];
+            const secPerBeat = 60 / BPM;              
+            const secPerMeasure = secPerBeat * 4;     
+            const totalMeasures = 100;                
+
+            for (let m = 0; m < totalMeasures; m++) {
+                let measureStartTime = m * secPerMeasure;
+                
+                // 1小節を16分割する（16分音符のグリッド）
+                let slots = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+                
+                for(let i = slots.length - 1; i > 0; i--){
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [slots[i], slots[j]] = [slots[j], slots[i]];
+                }
+
+                // 1小節あたり 8〜14個 のノーツを降らせる（連打確定）
+                let noteCount = Math.floor(Math.random() * 7) + 8; 
+                let selectedSlots = slots.slice(0, noteCount).sort((a,b) => a - b);
+
+                for (let slot of selectedSlots) {
+                    // 16分割したので、secPerMeasureも16で割る
+                    let time = measureStartTime + slot * (secPerMeasure / 16);
+                    
+                    if (time > 2.0) {
+                        chart.push({
+                            targetTime: time,
+                            lane: Math.floor(Math.random() * 2), 
+                            spawned: false,
+                            element: null
+                        });
+                    }
+                }
+            }
+            chart.sort((a, b) => a.targetTime - b.targetTime);
+        }
+
+        startBtn.addEventListener('click', () => {
+            startScreen.style.display = 'none';
+            score = 0;
+            scoreDisplay.innerText = score;
+            generateChart(); 
+            
+            gameActive = true;
+            bgm.currentTime = 0;
+            bgm.play();
+            
+            requestAnimationFrame(update);
+        });
+
+        bgm.addEventListener('ended', () => {
+            gameActive = false;
+            showFeedback('FINISH!', '#fff');
+        });
+
+        function update() {
+            if (!gameActive) return;
+            let currentTime = bgm.currentTime;
+
+            for (let i = 0; i < chart.length; i++) {
+                let noteData = chart[i];
+                if (!noteData.spawned && currentTime >= noteData.targetTime - fallTimeSec) {
+                    let el = document.createElement('div');
+                    el.classList.add('note');
+                    document.getElementById(`lane-${noteData.lane}`).appendChild(el);
+                    noteData.element = el;
+                    noteData.spawned = true;
+                    activeNotes.push(noteData);
+                }
+            }
+
+            for (let i = activeNotes.length - 1; i >= 0; i--) {
+                let note = activeNotes[i];
+                let timeDiff = note.targetTime - currentTime; 
+
+                if (timeDiff < -0.15) { 
+                    note.element.remove();
+                    activeNotes.splice(i, 1);
+                    showFeedback('MISS', 'red');
+                } else {
+                    let progress = (fallTimeSec - timeDiff) / fallTimeSec;
+                    let currentY = progress * judgmentY;
+                    note.element.style.top = currentY + 'px';
+                }
+            }
+
+            requestAnimationFrame(update);
+        }
+
+        document.querySelectorAll('.lane').forEach(lane => {
+            lane.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                judge(parseInt(lane.dataset.lane));
+            });
+            lane.addEventListener('mousedown', () => {
+                judge(parseInt(lane.dataset.lane));
+            });
+        });
+
+        const keys = { 'd': 0, 'k': 1 };
+        document.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) {
+                judge(keys[key]);
+            }
+        });
+
+        function judge(laneIndex) {
+            if (!gameActive) return;
+            let currentTime = bgm.currentTime;
+
+            let laneNotes = activeNotes.filter(n => n.lane === laneIndex);
+            if (laneNotes.length === 0) return;
+
+            laneNotes.sort((a, b) => Math.abs(a.targetTime - currentTime) - Math.abs(b.targetTime - currentTime));
+            let targetNote = laneNotes[0];
+
+            let diff = Math.abs(targetNote.targetTime - currentTime); 
+
+            // 連打に合わせて判定をほんの少しだけ甘くしています
+            if (diff < 0.1) { 
+                showFeedback('PERFECT!!', '#00ffcc');
+                score += 100;
+                hitNote(targetNote);
+            } else if (diff < 0.18) { 
+                showFeedback('GOOD', 'orange');
+                score += 50;
+                hitNote(targetNote);
+            }
+        }
+
+        function hitNote(note) {
+            note.element.style.backgroundColor = 'white';
+            note.element.style.boxShadow = '0 0 20px white';
+            setTimeout(() => {
+                if (note.element.parentNode) note.element.remove();
+            }, 50);
+            
+            let index = activeNotes.indexOf(note);
+            if(index > -1) activeNotes.splice(index, 1);
+            
+            scoreDisplay.innerText = score;
+        }
+
+        function showFeedback(text, color) {
+            feedbackDisplay.innerText = text;
+            feedbackDisplay.style.color = color;
+            clearTimeout(window.feedbackTimer);
+            window.feedbackTimer = setTimeout(() => { feedbackDisplay.innerText = ''; }, 400);
+        }
+    </script>
+</body>
+</html>
+
